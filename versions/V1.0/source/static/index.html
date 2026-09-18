@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI Drive Manager Agent V1</title>
+  <style>
+    :root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#151515;background:#f6f7f9}
+    body{margin:0}.wrap{max-width:980px;margin:0 auto;padding:28px 18px 60px}
+    .hero{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:22px}
+    h1{font-size:28px;margin:0 0 6px}.sub{color:#656b73;margin:0}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border-radius:999px;background:white;border:1px solid #e2e4e8;font-size:14px}
+    .dot{width:9px;height:9px;border-radius:99px;background:#aaa}.dot.ok{background:#1b9b54}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:white;border:1px solid #e3e6ea;border-radius:16px;padding:20px;box-shadow:0 3px 14px rgba(0,0,0,.03)}
+    h2{font-size:18px;margin:0 0 14px}button,.button{border:0;border-radius:10px;padding:11px 14px;background:#171717;color:white;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block}
+    button.secondary{background:#eef0f3;color:#222}.drop{border:1.5px dashed #c9ced6;border-radius:13px;padding:26px;text-align:center;margin:12px 0;background:#fafbfc}
+    input[type=file]{max-width:100%}.status{font-size:14px;color:#666;white-space:pre-wrap}.result{border-top:1px solid #eceef1;padding:14px 0}.result:first-child{border-top:0}
+    .name{font-weight:700}.meta{font-size:13px;color:#6b7077;margin-top:4px}.summary{font-size:14px;margin-top:7px;line-height:1.45}
+    .searchbar{display:flex;gap:8px}.searchbar input{flex:1;border:1px solid #d9dde2;border-radius:10px;padding:12px;font-size:15px}
+    .wide{grid-column:1/-1}.okmsg{background:#eefaf3;border:1px solid #cbeed8;padding:12px;border-radius:10px;margin-top:10px}
+    .warn{background:#fff8e7;border:1px solid #f1d48c;padding:12px;border-radius:10px;margin-top:10px}
+    @media(max-width:760px){.grid{grid-template-columns:1fr}.hero{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div><h1>AI Drive Manager Agent</h1><p class="sub">V1 · 自动分类、云端归档、快速检索</p></div>
+    <div class="pill"><span id="dot" class="dot"></span><span id="conn">检查连接中…</span></div>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>① 连接 Google Drive</h2>
+      <p class="status">首次使用需要 Google OAuth 授权。Agent 使用 drive.file 权限，只管理本应用创建/授权的文件。</p>
+      <a class="button" href="/api/auth/google">连接 Google Drive</a>
+      <button class="secondary" onclick="setupFolders()">建立分类文件夹</button>
+      <div id="setupStatus" class="status"></div>
+    </section>
+
+    <section class="card">
+      <h2>② 上传资料</h2>
+      <div class="drop">
+        <input id="file" type="file">
+        <p class="status">PDF / Word / TXT / 图片 / 常见语音文件</p>
+      </div>
+      <button onclick="upload()">分析并归档</button>
+      <div id="uploadStatus" class="status"></div>
+    </section>
+
+    <section class="card wide">
+      <h2>③ 查找资料</h2>
+      <div class="searchbar">
+        <input id="q" placeholder="例如：OCBC 银行资料 / MOM LOC / Shopee 退货" onkeydown="if(event.key==='Enter')search()">
+        <button onclick="search()">搜索</button>
+      </div>
+      <div id="results"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+async function status(){
+  const r=await fetch('/api/status'); const d=await r.json();
+  document.getElementById('dot').className='dot '+(d.google_connected?'ok':'');
+  document.getElementById('conn').textContent=d.google_connected?'Google Drive 已连接':'Google Drive 未连接';
+}
+async function setupFolders(){
+  const el=document.getElementById('setupStatus'); el.textContent='正在建立文件夹…';
+  const r=await fetch('/api/setup-folders',{method:'POST'}); const d=await r.json();
+  el.innerHTML=d.ok?'<div class="okmsg">分类文件夹已准备完成。</div>':'<div class="warn">'+(d.detail||'失败')+'</div>';
+}
+async function upload(){
+  const f=document.getElementById('file').files[0]; const el=document.getElementById('uploadStatus');
+  if(!f){el.textContent='请先选择文件。';return}
+  el.textContent='正在分析并上传…';
+  const fd=new FormData(); fd.append('file',f);
+  const r=await fetch('/api/upload',{method:'POST',body:fd}); const d=await r.json();
+  if(!r.ok){el.innerHTML='<div class="warn">'+(d.detail||'处理失败')+'</div>';return}
+  el.innerHTML=`<div class="okmsg"><b>已归档：</b>${escapeHtml(d.final_name)}<br>
+  <b>分类：</b>${escapeHtml(d.category_path)}<br>
+  <b>置信度：</b>${Math.round((d.confidence||0)*100)}%<br>
+  <b>摘要：</b>${escapeHtml(d.summary||'')}<br>
+  <a href="${d.web_view_link}" target="_blank">打开 Google Drive 文件</a></div>`;
+}
+async function search(){
+  const q=document.getElementById('q').value.trim(), el=document.getElementById('results');
+  if(!q){return}
+  el.innerHTML='<p class="status">正在搜索…</p>';
+  const r=await fetch('/api/search?q='+encodeURIComponent(q)); const d=await r.json();
+  if(!d.results?.length){el.innerHTML='<p class="status">没有找到匹配资料。</p>';return}
+  el.innerHTML=d.results.map(x=>`<div class="result">
+    <div class="name">${escapeHtml(x.name)}</div>
+    <div class="meta">${escapeHtml(x.category_path||'Google Drive')} ${x.confidence!=null?'· '+Math.round(x.confidence*100)+'%':''}</div>
+    <div class="summary">${escapeHtml(x.summary||'')}</div>
+    ${x.web_view_link?`<div class="meta"><a href="${x.web_view_link}" target="_blank">打开文件</a></div>`:''}
+  </div>`).join('');
+}
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+status();
+</script>
+</body>
+</html>
